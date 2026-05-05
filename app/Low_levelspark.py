@@ -1,74 +1,125 @@
-# ---------------------------------------------------------
-# PART 1: Spark Setup & Data Creation
-# ---------------------------------------------------------
 from pyspark.sql import SparkSession
 from operator import add
-import os
-
-# สร้าง SparkSession 
-spark = SparkSession.builder.master("local[*]").appName("LowLevelSpark").getOrCreate()
-
-alphabet_list = [('a', 1), ('b', 2), ('c', 3), ('a', 1), ('b', 2)]
-rdd = spark.sparkContext.parallelize(alphabet_list, 4) 
+import tempfile
+import shutil
 
 
-base_dir = os.path.dirname(os.path.abspath(__file__))
-csv_path = os.path.join(base_dir, "fb_live_thailand.csv")
-rdd_file = spark.sparkContext.textFile(csv_path, 5)
+spark = SparkSession.builder.appName("LowLevelSparkAssignment").getOrCreate()
+sc = spark.sparkContext
+sc.setLogLevel("ERROR")
 
-# ---------------------------------------------------------
-# PART 2: Transformation Functions (Define New RDDs)
-# ---------------------------------------------------------
+print("--- 0. RDD Creation (Slide 14) ---")
+# สร้าง RDD จาก List
+alphabet = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']
+rdd_alpha = sc.parallelize(alphabet, 4)
+print("Number of partitions (alpha):", rdd_alpha.getNumPartitions())
 
-# Narrow Transformations 
-distinct_rdd = rdd.distinct()
-filter_rdd = rdd.filter(lambda x: x[0] == 'a') 
-map_rdd = rdd.map(lambda x: (x[0], x[1] * 10)) 
+# สร้าง RDD จาก Text File (ใช้ไฟล์ที่คุณมี)
+rdd_csv = sc.textFile("fb_live_thailand.csv", 5)
+print("Number of partitions (csv):", rdd_csv.getNumPartitions())
 
-reduce_rdd = rdd.reduceByKey(lambda x, y: x + y) 
-sorted_key = rdd.sortByKey() 
-sorted_val = rdd.sortBy(lambda x: x[1], False, 5) 
+# สร้าง RDD แบบ Key-Value Pairs สำหรับใช้ทดสอบคำสั่งอื่นๆ
+kv_data = [('a',1), ('b',2), ('c',3), ('a', 1), ('b',2)]
+rdd_kv = sc.parallelize(kv_data, 4)
 
-# Advanced Key-Value Transformations
-# aggregateByKey: รวมค่าในระดับ Partition ก่อนแล้วจึงรวมข้าม 
+# 1. Transformations 
+
+print("\n--- 1. Transformations ---")
+
+#  distinct() และ count()
+count_distinct = rdd_csv.distinct().count()
+print("Number of distinct records in CSV: ", count_distinct)
+
+#  filter()
+
+filter_rdd = rdd_csv.filter(lambda x: len(x.split(',')) > 1 and x.split(',')[1] == 'link').take(5) 
+print("Filter (take 5):", filter_rdd)
+
+#  flatMap() และ map()
+flatmap_rdd = rdd_csv.flatMap(lambda x: x.split(','))
+pair = flatmap_rdd.map(lambda x: (x, 1))
+print("flatMap & map (take 5):", pair.take(5))
+
+#  sortByKey()
+# (ใช้ rdd_kv เพื่อความรวดเร็วในการแสดงผล)
+sort_data_key = rdd_kv.sortByKey().collect()
+print("sortByKey:", sort_data_key)
+
+#  sortBy()
+sort_data = rdd_kv.sortBy(lambda x: x, False, 5).collect()
+print("sortBy (descending):", sort_data)
+
+#  reduceByKey()
+reduce_key = rdd_kv.reduceByKey(lambda x, y: x + y)
+print("reduceByKey:", reduce_key.collect())
+
+#  aggregateByKey()
 zero_val = (0, 0)
 par_agg = lambda x, y: (x[0] + y, x[1] + 1)
 allpar_agg = lambda x, y: (x[0] + y[0], x[1] + y[1])
-agg_rdd = rdd.aggregateByKey(zero_val, par_agg, allpar_agg)
+agg = rdd_kv.aggregateByKey(zero_val, par_agg, allpar_agg).collect()
+print("aggregateByKey:", agg)
 
-# foldByKey: คล้าย aggregate แต่ใช้ค่าเริ่มต้นที่เหมือนกันทั้งตอนเริ่มและตอนรวม 
-fold_rdd = rdd.foldByKey(0, add)
+#  foldByKey()
+fold = sorted(rdd_kv.foldByKey(0, add).collect())
+print("foldByKey:", fold)
 
-# combineByKey: แปลง Key-Value ให้เป็นชุดข้อมูลที่ซับซ้อนขึ้น 
-combine_rdd = rdd.combineByKey(lambda x: [x], lambda x, y: x + [y], lambda x, y: x + y)
+#  combineByKey()
+def tolist(x): return [x]
+def append_val(x, y): 
+    x.append(y)
+    return x
+def extend_val(x, y): 
+    x.extend(y)
+    return x
+combine = sorted(rdd_kv.combineByKey(tolist, append_val, extend_val).collect())
+print("combineByKey:", combine)
 
-# groupByKey: จัดกลุ่มค่าตาม Key 
-group_rdd = rdd.groupByKey().mapValues(list)
+#  groupByKey()
+group1 = sorted(rdd_kv.groupByKey().mapValues(len).collect())
+print("groupByKey (len):", group1)
+group2 = sorted(rdd_kv.groupByKey().mapValues(list).collect())
+print("groupByKey (list):", group2)
 
-# Join Operations 
-rdd_extra = spark.sparkContext.parallelize([('a', 100), ('z', 999)])
-join_rdd = rdd.join(rdd_extra)
+#  join(), leftOuterJoin(), rightOuterJoin()
+rdd1 = sc.parallelize([('a',1), ('b',2), ('c',3)])
+rdd2 = sc.parallelize([('a',1), ('b',2), ('a',1), ('b',2)])
 
-# ---------------------------------------------------------
-# PART 3: Action Functions (Trigger Execution & Show Results)
-# ---------------------------------------------------------
+print("join:", rdd1.join(rdd2).collect())
+print("leftOuterJoin:", rdd1.leftOuterJoin(rdd2).collect())
+print("rightOuterJoin:", rdd1.rightOuterJoin(rdd2).collect())
 
-print("--- RESULTS OF ACTION FUNCTIONS ---")
+# 2. Actions 
 
-# แสดงผลลัพธ์พื้นฐาน
-print("1. Collect:", rdd.collect()) 
-print("2. Count:", rdd.count()) 
-print("3. First:", rdd.first()) 
-print("4. Max/Min:", rdd.max(), "/", rdd.min()) 
+print("\n--- 2. Actions ---")
 
-# แสดงผลลัพธ์ฟังก์ชัน Dictionary/Key-based
-print("5. CountByKey:", rdd.countByKey())
-print("6. CountByValue:", rdd.countByValue()) 
-print("7. CollectAsMap:", rdd.collectAsMap()) 
-print("8. Lookup 'a':", rdd.lookup('a'))
+#  countByKey()
+print("countByKey:", dict(rdd_kv.countByKey()))
 
-# แสดงตัวอย่างข้อมูลจากไฟล์ (เพื่อยืนยันว่าอ่านไฟล์สำเร็จ)
-print("9. Sample lines from CSV:", rdd_file.take(3))
+#  countByValue()
+print("countByValue:", dict(rdd_kv.countByValue()))
 
-print("--- FINISHED ---")
-spark.stop()
+#  collectAsMap()
+print("collectAsMap:", rdd_kv.collectAsMap())
+
+#  lookup()
+print("lookup('a'):", rdd_kv.lookup('a'))
+
+#  first()
+print("first:", rdd_kv.first())
+
+#  max() และ min()
+print("max:", rdd_kv.max())
+print("min:", rdd_kv.min())
+
+# 3. Save Output (Slide 32)
+
+print("\n--- 3. Save to File ---")
+#  saveAsTextFile()
+folder = "textfile_output"
+import os
+if os.path.exists(folder):
+    shutil.rmtree(folder)
+
+rdd_kv.saveAsTextFile(folder)
+print(f"Data successfully saved to folder: {folder}")

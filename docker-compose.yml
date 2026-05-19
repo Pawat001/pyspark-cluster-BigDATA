@@ -3,7 +3,7 @@ version: "3"
 services:
   # 1. Master: ตัวควบคุมหลักของ Cluster
   spark-master:
-    image: apache/spark:3.5.0
+    build: .
     container_name: spark-master
     command: >
       /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
@@ -16,7 +16,7 @@ services:
 
   # 2. Worker 1: เครื่องลูกข่ายเครื่องที่ 1 ที่ใช้ประมวลผลจริง
   spark-worker-1:
-    image: apache/spark:3.5.0
+    build: .
     container_name: spark-worker-1
     command: >
       /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
@@ -29,7 +29,7 @@ services:
 
   # 3. Worker 2: เครื่องลูกข่ายเครื่องที่ 2 เพิ่มพลังการประมวลผล
   spark-worker-2:
-    image: apache/spark:3.5.0
+    build: .
     container_name: spark-worker-2
     command: >
       /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
@@ -42,7 +42,7 @@ services:
 
   # 4. Client: เครื่องสำหรับส่ง Code (เช่น .py) เข้าไปรันใน Cluster
   spark-client:
-    image: apache/spark:3.5.0
+    build: .
     container_name: spark-client
     depends_on:
       - spark-master
